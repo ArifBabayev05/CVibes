@@ -243,7 +243,7 @@ app.post('/analyze-cvs', async (req, res) => {
 });
 
 // Endpoint to process bulk CVs and return base64 data
-app.post('/.netlify/functions/api/process-bulk-cvs', async (req, res) => {
+app.post('/api/process-bulk-cvs', async (req, res) => {
     const { documents } = req.body;
     
     if (!documents || !Array.isArray(documents)) {
@@ -326,7 +326,7 @@ app.post('/.netlify/functions/api/process-bulk-cvs', async (req, res) => {
 });
 
 // Endpoint to analyze bulk extracted texts
-app.post('/.netlify/functions/api/analyze-bulk-texts', async (req, res) => {
+app.post('/api/analyze-bulk-texts', async (req, res) => {
     const { texts } = req.body;
     
     if (!texts || !Array.isArray(texts)) {
@@ -390,7 +390,7 @@ app.post('/.netlify/functions/api/analyze-bulk-texts', async (req, res) => {
 });
 
 // Health check endpoint
-app.get('/.netlify/functions/api/health', async (req, res) => {
+app.get('/api/health', async (req, res) => {
     res.json({
         status: 'ok',
         timestamp: new Date(),
