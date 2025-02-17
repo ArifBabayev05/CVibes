@@ -1,9 +1,10 @@
 const axios = require('axios');
 const express = require('express');
+const serverless = require('serverless-http');
 const app = express();
 
 // Add middleware to parse JSON bodies
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 // Add required package for PDF parsing
 const pdfParse = require('pdf-parse');
@@ -242,7 +243,7 @@ app.post('/analyze-cvs', async (req, res) => {
 });
 
 // Endpoint to process bulk CVs and return base64 data
-app.post('/process-cvs', async (req, res) => {
+app.post('/.netlify/functions/api/process-bulk-cvs', async (req, res) => {
     const { documents } = req.body;
     
     if (!documents || !Array.isArray(documents)) {
@@ -325,7 +326,7 @@ app.post('/process-cvs', async (req, res) => {
 });
 
 // Endpoint to analyze bulk extracted texts
-app.post('/analyze-texts', async (req, res) => {
+app.post('/.netlify/functions/api/analyze-bulk-texts', async (req, res) => {
     const { texts } = req.body;
     
     if (!texts || !Array.isArray(texts)) {
@@ -389,37 +390,15 @@ app.post('/analyze-texts', async (req, res) => {
 });
 
 // Health check endpoint
-app.get('/health', async (req, res) => {
-    try {
-        // Basic health check
-        const healthCheck = {
-            status: 'ok',
-            timestamp: new Date(),
-            uptime: process.uptime(),
-            service: 'document-analyzer',
-            version: '1.0.0'
-        };
-
-        // Optional: Check Mistral API connectivity
-        try {
-            await axios.get('https://api.mistral.ai/v1/models', {
-                headers: {
-                    'Authorization': `Bearer ${apiKey}`
-                }
-            });
-            healthCheck.mistralAPI = 'connected';
-        } catch (error) {
-            healthCheck.mistralAPI = 'disconnected';
-        }
-
-        res.json(healthCheck);
-    } catch (error) {
-        res.status(500).json({
-            status: 'error',
-            message: error.message
-        });
-    }
+app.get('/.netlify/functions/api/health', async (req, res) => {
+    res.json({
+        status: 'ok',
+        timestamp: new Date(),
+        service: 'document-analyzer'
+    });
 });
+
+module.exports.handler = serverless(app);
 
 // Start server
 const PORT = process.env.PORT || 3000;
