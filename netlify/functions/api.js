@@ -1,7 +1,15 @@
 const axios = require('axios');
 const express = require('express');
 const serverless = require('serverless-http');
+const cors = require('cors');
 const app = express();
+
+// Add CORS middleware
+app.use(cors({
+    origin: '*', // Tüm originlere izin ver (production'da spesifik domainler belirtilmeli)
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 // Add middleware to parse JSON bodies
 app.use(express.json({ limit: '50mb' }));
