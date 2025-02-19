@@ -4,12 +4,22 @@ const serverless = require('serverless-http');
 const cors = require('cors');
 const app = express();
 
-// Add CORS middleware
+// Add CORS middleware with specific configuration
 app.use(cors({
-    origin: '*', // Tüm originlere izin ver (production'da spesifik domainler belirtilmeli)
-    methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    origin: '*',
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
+    credentials: true,
+    preflightContinue: true
 }));
+
+// Add OPTIONS handling for preflight requests
+app.options('*', cors());
+
+// Handle preflight requests for specific routes
+app.options('/api/process-bulk-cvs', cors());
+app.options('/api/analyze-bulk-texts', cors());
+app.options('/api/health', cors());
 
 // Add middleware to parse JSON bodies
 app.use(express.json({ limit: '50mb' }));
