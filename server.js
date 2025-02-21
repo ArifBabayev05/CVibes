@@ -1,18 +1,24 @@
 const axios = require('axios');
 const express = require('express');
+const serverless = require('serverless-http');
+const cors = require('cors');
+const pdfParse = require('pdf-parse');
+const Tesseract = require('tesseract.js');
+const mammoth = require('mammoth');
+
 const app = express();
 
-// Add middleware to parse JSON bodies
-app.use(express.json());
+// CORS configuration
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
+    credentials: true,
+    preflightContinue: true
+}));
 
-// Add required package for PDF parsing
-const pdfParse = require('pdf-parse');
-
-// Add required packages for PDF and image processing
-const Tesseract = require('tesseract.js');
-
-// Add required packages for file processing
-const mammoth = require('mammoth'); // for DOCX files
+app.options('*', cors());
+app.use(express.json({ limit: '50mb' }));
 
 const apiKey = '6V6226aySY3BqDtPqbsasNFSb3VnHhnf';
 const model = 'mistral-small-latest';
@@ -36,105 +42,8 @@ Important:
 Your task is to parse and structure the CV text completely, ensuring no important details are omitted.
 `;
 
-// Create POST endpoint to handle text analysis
-// app.post('/analyze', async (req, res) => {
-//     const { text } = req.body;
-    
-//     if (!text) {
-//         return res.status(400).json({ error: 'Text is required' });
-//     }
-
-//     const data = {
-//         model: model,
-//         messages: [
-//             {
-//                 role: 'system',
-//                 content: systemPrompt
-//             },
-//             {
-//                 role: 'user',
-//                 content: text
-//             }
-//         ]
-//     };
-
-//     try {
-//         const response = await axios.post('https://api.mistral.ai/v1/chat/completions', data, {
-//             headers: {
-//                 'Authorization': `Bearer ${apiKey}`,
-//                 'Content-Type': 'application/json'
-//             }
-//         });
-        
-//         res.json({ result: response.data.choices[0].message.content });
-//     } catch (error) {
-//         res.status(500).json({ 
-//             error: error.response ? error.response.data : error.message 
-//         });
-//     }
-// });
-
-// // Create POST endpoint to handle document analysis (PDF or Image)
-// app.post('/analyze-document', async (req, res) => {
-//     const { base64Data, fileType } = req.body;
-    
-//     if (!base64Data) {
-//         return res.status(400).json({ error: 'Base64 data is required' });
-//     }
-    
-//     if (!fileType) {
-//         return res.status(400).json({ error: 'File type is required (pdf/image)' });
-//     }
-
-//     try {
-//         let extractedText;
-        
-//         if (fileType === 'pdf') {
-//             // Handle PDF
-//             const pdfBuffer = Buffer.from(base64Data, 'base64');
-//             const pdfData = await pdfParse(pdfBuffer);
-//             extractedText = pdfData.text;
-//         } else if (fileType === 'image') {
-//             // Handle Image
-//             const imageBuffer = Buffer.from(base64Data, 'base64');
-//             const { data: { text } } = await Tesseract.recognize(imageBuffer);
-//             extractedText = text;
-//         } else {
-//             return res.status(400).json({ error: 'Invalid file type. Supported types: pdf, image' });
-//         }
-        
-//         // Use the existing Mistral AI analysis logic
-//         const data = {
-//             model: model,
-//             messages: [
-//                 {
-//                     role: 'system',
-//                     content: systemPrompt
-//                 },
-//                 {
-//                     role: 'user',
-//                     content: extractedText
-//                 }
-//             ]
-//         };
-
-//         const response = await axios.post('https://api.mistral.ai/v1/chat/completions', data, {
-//             headers: {
-//                 'Authorization': `Bearer ${apiKey}`,
-//                 'Content-Type': 'application/json'
-//             }
-//         });
-        
-//         res.json({ result: response.data.choices[0].message.content });
-//     } catch (error) {
-//         res.status(500).json({ 
-//             error: error.response ? error.response.data : error.message 
-//         });
-//     }
-// });
-
-// Create POST endpoint for bulk CV upload and analysis
-app.post('/analyze-cvs', async (req, res) => {
+// Single endpoint to handle all CV processing
+app.post('/api/analyze-cvs', async (req, res) => {
     const { documents } = req.body;
     
     if (!documents || !Array.isArray(documents)) {
@@ -144,9 +53,7 @@ app.post('/analyze-cvs', async (req, res) => {
     }
 
     try {
-        const results = [];
-        
-        // Process each document in parallel
+        // Process each document and analyze with AI in parallel
         const processPromises = documents.map(async (doc, index) => {
             try {
                 const { base64, fileType } = doc;
@@ -159,28 +66,25 @@ app.post('/analyze-cvs', async (req, res) => {
                     };
                 }
 
+                // 1. Extract text from document
                 let extractedText;
                 const buffer = Buffer.from(base64, 'base64');
 
-                // Extract text based on file type
                 switch(fileType.toLowerCase()) {
                     case 'pdf':
                         const pdfData = await pdfParse(buffer);
                         extractedText = pdfData.text;
                         break;
-                        
                     case 'docx':
                         const { value } = await mammoth.extractRawText({ buffer });
                         extractedText = value;
                         break;
-                        
                     case 'png':
                     case 'jpg':
                     case 'jpeg':
                         const { data: { text } } = await Tesseract.recognize(buffer);
                         extractedText = text;
                         break;
-                        
                     default:
                         return {
                             index,
@@ -189,8 +93,8 @@ app.post('/analyze-cvs', async (req, res) => {
                         };
                 }
 
-                // Analyze extracted text with Mistral AI
-                const data = {
+                // 2. Analyze with Mistral AI
+                const aiResponse = await axios.post('https://api.mistral.ai/v1/chat/completions', {
                     model: model,
                     messages: [
                         {
@@ -202,19 +106,18 @@ app.post('/analyze-cvs', async (req, res) => {
                             content: extractedText
                         }
                     ]
-                };
-
-                const response = await axios.post('https://api.mistral.ai/v1/chat/completions', data, {
+                }, {
                     headers: {
                         'Authorization': `Bearer ${apiKey}`,
                         'Content-Type': 'application/json'
                     }
                 });
 
+                // 3. Parse and return structured result
                 return {
                     index,
                     status: 'success',
-                    result: response.data.choices[0].message.content
+                    result: JSON.parse(aiResponse.data.choices[0].message.content)
                 };
 
             } catch (error) {
@@ -226,12 +129,11 @@ app.post('/analyze-cvs', async (req, res) => {
             }
         });
 
-        // Wait for all documents to be processed
-        const processedResults = await Promise.all(processPromises);
+        const results = await Promise.all(processPromises);
         
         res.json({
-            totalProcessed: processedResults.length,
-            results: processedResults
+            totalProcessed: results.length,
+            results: results
         });
 
     } catch (error) {
@@ -241,185 +143,15 @@ app.post('/analyze-cvs', async (req, res) => {
     }
 });
 
-// Endpoint to process bulk CVs and return base64 data
-app.post('/process-cvs', async (req, res) => {
-    const { documents } = req.body;
-    
-    if (!documents || !Array.isArray(documents)) {
-        return res.status(400).json({ 
-            error: 'Documents array is required in format: [{base64: "...", fileType: "pdf/docx/image"}]' 
-        });
-    }
-
-    try {
-        // Process each document in parallel
-        const processPromises = documents.map(async (doc, index) => {
-            try {
-                const { base64, fileType } = doc;
-                
-                if (!base64 || !fileType) {
-                    return {
-                        index,
-                        status: 'error',
-                        error: 'Missing base64 or fileType'
-                    };
-                }
-
-                let extractedText;
-                const buffer = Buffer.from(base64, 'base64');
-
-                // Extract text based on file type
-                switch(fileType.toLowerCase()) {
-                    case 'pdf':
-                        const pdfData = await pdfParse(buffer);
-                        extractedText = pdfData.text;
-                        break;
-                        
-                    case 'docx':
-                        const { value } = await mammoth.extractRawText({ buffer });
-                        extractedText = value;
-                        break;
-                        
-                    case 'png':
-                    case 'jpg':
-                    case 'jpeg':
-                        const { data: { text } } = await Tesseract.recognize(buffer);
-                        extractedText = text;
-                        break;
-                        
-                    default:
-                        return {
-                            index,
-                            status: 'error',
-                            error: 'Unsupported file type'
-                        };
-                }
-
-                return {
-                    index,
-                    status: 'success',
-                    extractedText
-                };
-
-            } catch (error) {
-                return {
-                    index,
-                    status: 'error',
-                    error: error.message
-                };
-            }
-        });
-
-        const processedResults = await Promise.all(processPromises);
-        
-        res.json({
-            totalProcessed: processedResults.length,
-            results: processedResults
-        });
-
-    } catch (error) {
-        res.status(500).json({ 
-            error: error.message 
-        });
-    }
+// Simple health check endpoint
+app.get('/api/health', async (req, res) => {
+    res.json({
+        status: 'ok',
+        timestamp: new Date()
+    });
 });
 
-// Endpoint to analyze bulk extracted texts
-app.post('/analyze-texts', async (req, res) => {
-    const { texts } = req.body;
-    
-    if (!texts || !Array.isArray(texts)) {
-        return res.status(400).json({ 
-            error: 'Texts array is required' 
-        });
-    }
-
-    try {
-        // Analyze each text in parallel
-        const analysisPromises = texts.map(async (text, index) => {
-            try {
-                const data = {
-                    model: model,
-                    messages: [
-                        {
-                            role: 'system',
-                            content: systemPrompt
-                        },
-                        {
-                            role: 'user',
-                            content: text
-                        }
-                    ]
-                };
-
-                const response = await axios.post('https://api.mistral.ai/v1/chat/completions', data, {
-                    headers: {
-                        'Authorization': `Bearer ${apiKey}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-
-                return {
-                    index,
-                    status: 'success',
-                    result: JSON.parse(response.data.choices[0].message.content)
-                };
-
-            } catch (error) {
-                return {
-                    index,
-                    status: 'error',
-                    error: error.message
-                };
-            }
-        });
-
-        const analysisResults = await Promise.all(analysisPromises);
-        
-        res.json({
-            totalAnalyzed: analysisResults.length,
-            results: analysisResults
-        });
-
-    } catch (error) {
-        res.status(500).json({ 
-            error: error.message 
-        });
-    }
-});
-
-// Health check endpoint
-app.get('/health', async (req, res) => {
-    try {
-        // Basic health check
-        const healthCheck = {
-            status: 'ok',
-            timestamp: new Date(),
-            uptime: process.uptime(),
-            service: 'document-analyzer',
-            version: '1.0.0'
-        };
-
-        // Optional: Check Mistral API connectivity
-        try {
-            await axios.get('https://api.mistral.ai/v1/models', {
-                headers: {
-                    'Authorization': `Bearer ${apiKey}`
-                }
-            });
-            healthCheck.mistralAPI = 'connected';
-        } catch (error) {
-            healthCheck.mistralAPI = 'disconnected';
-        }
-
-        res.json(healthCheck);
-    } catch (error) {
-        res.status(500).json({
-            status: 'error',
-            message: error.message
-        });
-    }
-});
+module.exports.handler = serverless(app);
 
 // Start server
 const PORT = process.env.PORT || 3000;
