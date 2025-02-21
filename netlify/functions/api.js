@@ -8,17 +8,30 @@ const mammoth = require('mammoth');
 
 const app = express();
 
-// Updated CORS configuration
+// Updated CORS configuration with production URL
 app.use(cors({
-    origin: '*',
+    origin: [
+        'http://localhost:5173',
+        'http://localhost:3000',
+        'https://cvibes.netlify.app',
+        'https://cvibes-api.netlify.app'
+    ],
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept'],
     credentials: true,
     optionsSuccessStatus: 200
 }));
 
-// Handle OPTIONS preflight requests
+// Handle preflight requests
 app.options('*', cors());
+
+// Ensure all responses include CORS headers
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', 'https://cvibes.netlify.app');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin, X-Requested-With, Accept');
+    next();
+});
 
 app.use(express.json({ limit: '50mb' }));
 
