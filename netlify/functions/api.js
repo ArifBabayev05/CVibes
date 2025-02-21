@@ -53,7 +53,6 @@ app.post('/api/analyze-cvs', async (req, res) => {
     }
 
     try {
-        // Process each document and analyze with AI in parallel
         const processPromises = documents.map(async (doc, index) => {
             try {
                 const { base64, fileType } = doc;
@@ -66,7 +65,6 @@ app.post('/api/analyze-cvs', async (req, res) => {
                     };
                 }
 
-                // 1. Extract text from document
                 let extractedText;
                 const buffer = Buffer.from(base64, 'base64');
 
@@ -93,7 +91,7 @@ app.post('/api/analyze-cvs', async (req, res) => {
                         };
                 }
 
-                // 2. Analyze with Mistral AI
+                // AI Analysis with error handling
                 const aiResponse = await axios.post('https://api.mistral.ai/v1/chat/completions', {
                     model: model,
                     messages: [
@@ -113,18 +111,34 @@ app.post('/api/analyze-cvs', async (req, res) => {
                     }
                 });
 
-                // 3. Parse and return structured result
+                // Safe parsing of AI response
+                let parsedResult;
+                try {
+                    const aiContent = aiResponse.data.choices[0].message.content;
+                    // Try to parse, if fails, return the raw content
+                    parsedResult = JSON.parse(aiContent);
+                } catch (parseError) {
+                    console.error('JSON Parse Error:', parseError);
+                    return {
+                        index,
+                        status: 'error',
+                        error: 'Failed to parse AI response',
+                        rawContent: aiResponse.data.choices[0].message.content
+                    };
+                }
+
                 return {
                     index,
                     status: 'success',
-                    result: JSON.parse(aiResponse.data.choices[0].message.content)
+                    result: parsedResult
                 };
 
             } catch (error) {
+                console.error('Processing Error:', error);
                 return {
                     index,
                     status: 'error',
-                    error: error.message
+                    error: error.message || 'Unknown error occurred'
                 };
             }
         });
@@ -137,8 +151,9 @@ app.post('/api/analyze-cvs', async (req, res) => {
         });
 
     } catch (error) {
+        console.error('Main Error:', error);
         res.status(500).json({ 
-            error: error.message 
+            error: error.message || 'Unknown error occurred'
         });
     }
 });
