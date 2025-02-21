@@ -8,16 +8,22 @@ const mammoth = require('mammoth');
 
 const app = express();
 
-// CORS configuration
+// Completely open CORS
 app.use(cors({
     origin: '*',
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
-    credentials: true,
-    preflightContinue: true
+    methods: '*',
+    allowedHeaders: '*',
+    credentials: true
 }));
 
-app.options('*', cors());
+// No need for options handling as it's fully open
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', '*');
+    res.header('Access-Control-Allow-Headers', '*');
+    next();
+});
+
 app.use(express.json({ limit: '50mb' }));
 
 // Update API key to use environment variable
