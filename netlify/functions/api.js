@@ -20,7 +20,8 @@ app.use(cors({
 app.options('*', cors());
 app.use(express.json({ limit: '50mb' }));
 
-const apiKey = '6V6226aySY3BqDtPqbsasNFSb3VnHhnf';
+// Update API key to use environment variable
+const apiKey = process.env.MISTRAL_API_KEY;
 const model = 'mistral-small-latest';
 const systemPrompt = `
 You are an AI assistant specialized in extracting structured information from CV texts. Analyze the provided CV text and extract all relevant details. Your output must be a valid JSON object with the following keys:
@@ -91,13 +92,17 @@ app.post('/api/analyze-cvs', async (req, res) => {
                         };
                 }
 
-                // AI Analysis with error handling
+                console.log('Extracted Text:', extractedText.substring(0, 200) + '...');
+
+                const modifiedSystemPrompt = `${systemPrompt}
+                IMPORTANT: Your response MUST be a valid JSON object. Do not include any explanatory text outside the JSON structure.`;
+
                 const aiResponse = await axios.post('https://api.mistral.ai/v1/chat/completions', {
                     model: model,
                     messages: [
                         {
                             role: 'system',
-                            content: systemPrompt
+                            content: modifiedSystemPrompt
                         },
                         {
                             role: 'user',
@@ -111,19 +116,23 @@ app.post('/api/analyze-cvs', async (req, res) => {
                     }
                 });
 
-                // Safe parsing of AI response
+                const aiContent = aiResponse.data.choices[0].message.content;
+                console.log('AI Response:', aiContent);
+
                 let parsedResult;
                 try {
-                    const aiContent = aiResponse.data.choices[0].message.content;
-                    // Try to parse, if fails, return the raw content
-                    parsedResult = JSON.parse(aiContent);
+                    let cleanContent = aiContent.trim();
+                    if (cleanContent.startsWith('```json')) {
+                        cleanContent = cleanContent.replace(/```json\n?/, '').replace(/```$/, '');
+                    }
+                    parsedResult = JSON.parse(cleanContent);
                 } catch (parseError) {
-                    console.error('JSON Parse Error:', parseError);
+                    console.error('Parse Error:', parseError);
                     return {
                         index,
                         status: 'error',
                         error: 'Failed to parse AI response',
-                        rawContent: aiResponse.data.choices[0].message.content
+                        rawContent: aiContent
                     };
                 }
 
@@ -138,7 +147,8 @@ app.post('/api/analyze-cvs', async (req, res) => {
                 return {
                     index,
                     status: 'error',
-                    error: error.message || 'Unknown error occurred'
+                    error: error.message,
+                    details: error.response?.data || 'No additional details'
                 };
             }
         });
@@ -153,7 +163,8 @@ app.post('/api/analyze-cvs', async (req, res) => {
     } catch (error) {
         console.error('Main Error:', error);
         res.status(500).json({ 
-            error: error.message || 'Unknown error occurred'
+            error: error.message,
+            details: error.response?.data || 'No additional details'
         });
     }
 });
