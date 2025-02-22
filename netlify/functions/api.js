@@ -14,7 +14,14 @@ const docx4js = require('docx4js');
 
 const app = express();
 
-app.use(cors({ origin: '*', methods: '*', allowedHeaders: '*', credentials: true }));
+// Configure CORS to allow requests from specific origins
+app.use(cors({
+    origin: 'https://cvibes.netlify.app', // Replace with your frontend URL
+    methods: 'GET,POST,PUT,DELETE,OPTIONS',
+    allowedHeaders: 'Content-Type,Authorization',
+    credentials: true
+}));
+
 app.use(express.json({ limit: '50mb' }));
 
 const apiKey = process.env.MISTRAL_API_KEY;
