@@ -14,22 +14,16 @@ const docx4js = require('docx4js');
 
 const app = express();
 
-// Configure CORS to allow requests from specific origins
-const corsOptions = {
-    origin: 'https://cvibes.netlify.app',
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+// Configure CORS to allow requests from any origin
+app.use(cors({
+    origin: '*',
+    methods: 'GET,POST,PUT,DELETE,OPTIONS',
+    allowedHeaders: 'Content-Type,Authorization',
     credentials: true
-};
+}));
 
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // Allow OPTIONS for all routes
-
-
-// JSON gövdeyi ayrıştırmak için middleware (50mb limit)
 app.use(express.json({ limit: '50mb' }));
 
-// Ortam değişkeninden API anahtarını al
 const apiKey = process.env.MISTRAL_API_KEY;
 const model = 'mistral-small-latest';
 const systemPrompt = `
@@ -39,39 +33,19 @@ If missing, use an empty string or array.
 Ensure the JSON is valid and well-formatted.
 `;
 
-// OPTIONS istekleri için manuel CORS preflight yanıtı
-app.options('/api/analyze-cvs', (req, res) => {
-    res.status(200).set({
-        "Access-Control-Allow-Origin": "https://cvibes.netlify.app",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "Access-Control-Max-Age": "86400",
-    }).send();
-});
-
-// CV analiz endpoint'i
 app.post('/api/analyze-cvs', async (req, res) => {
     const { documents } = req.body;
     
     if (!Array.isArray(documents)) {
-        return res.status(400).set({
-            "Access-Control-Allow-Origin": "https://cvibes.netlify.app",
-            "Content-Type": "application/json"
-        }).json({ error: 'Invalid format: documents should be an array.' });
+        return res.status(400).json({ error: 'Invalid format: documents should be an array.' });
     }
 
     try {
         const results = await Promise.all(documents.map(processDocument));
-        res.status(200).set({
-            "Access-Control-Allow-Origin": "https://cvibes.netlify.app",
-            "Content-Type": "application/json"
-        }).json({ totalProcessed: results.length, results });
+        res.json({ totalProcessed: results.length, results });
     } catch (error) {
         console.error('Main Error:', error);
-        res.status(500).set({
-            "Access-Control-Allow-Origin": "https://cvibes.netlify.app",
-            "Content-Type": "application/json"
-        }).json({ error: error.message, details: error.response?.data || 'No additional details' });
+        res.status(500).json({ error: error.message, details: error.response?.data || 'No additional details' });
     }
 });
 
@@ -144,13 +118,9 @@ async function getAIResponse(text) {
     return JSON.parse(response.data.choices[0].message.content.replace(/```json\n?|```$/g, ''));
 }
 
-// Sağlık kontrol endpoint'i
-app.get('/api/health', (req, res) => {
-    res.status(200).set({
-        "Access-Control-Allow-Origin": "https://cvibes.netlify.app",
-        "Content-Type": "application/json"
-    }).json({ status: 'ok', timestamp: new Date() });
-});
+app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
 
-// Netlify Function handler'ı
 module.exports.handler = serverless(app);
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

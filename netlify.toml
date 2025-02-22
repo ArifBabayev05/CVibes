@@ -7,12 +7,11 @@
   to = "/.netlify/functions/api/:splat"
   status = 200
   force = true
-  headers = {Access-Control-Allow-Origin = "*"}
 
 [[headers]]
   for = "/api/*"
   [headers.values]
-    Access-Control-Allow-Origin = "https://cvibes.netlify.app"
+    Access-Control-Allow-Origin = "*"
     Access-Control-Allow-Methods = "GET, POST, OPTIONS"
     Access-Control-Allow-Headers = "Content-Type, Authorization"
     Access-Control-Allow-Credentials = "true"
