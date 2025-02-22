@@ -5,8 +5,27 @@ const cors = require('cors');
 const pdfParse = require('pdf-parse');
 const Tesseract = require('tesseract.js');
 const mammoth = require('mammoth');
+const fs = require('fs');
+const path = require('path');
+const { DOMParser } = require('xmldom'); // Required for docx parsing
+const pdfExtract = require('pdf-text-extract'); // Fallback for OCR-based PDFs
+const { PDFDocument } = require('pdf-lib');
+const docx4js = require('docx4js');
 
 const app = express();
+
+// Logging function
+const logToFile = (message) => {
+    const logMessage = `${new Date().toISOString()} - ${message}\n`;
+    fs.appendFileSync(path.join(__dirname, 'logs.txt'), logMessage);
+};
+
+// Override console.log to include logging to file
+const originalConsoleLog = console.log;
+console.log = (...args) => {
+    originalConsoleLog(...args);
+    logToFile(args.join(' '));
+};
 
 // Completely open CORS
 app.use(cors({
@@ -49,6 +68,12 @@ Important:
 Your task is to parse and structure the CV text completely, ensuring no important details are omitted.
 `;
 
+// Middleware to log each request
+app.use((req, res, next) => {
+    logToFile(`Request: ${req.method} ${req.url} - Body: ${JSON.stringify(req.body)}`);
+    next();
+});
+
 // Single endpoint to handle all CV processing
 app.post('/api/analyze-cvs', async (req, res) => {
     const { documents } = req.body;
@@ -75,14 +100,12 @@ app.post('/api/analyze-cvs', async (req, res) => {
                 let extractedText;
                 const buffer = Buffer.from(base64, 'base64');
 
-                switch(fileType.toLowerCase()) {
+                switch (fileType.toLowerCase()) {
                     case 'pdf':
-                        const pdfData = await pdfParse(buffer);
-                        extractedText = pdfData.text;
+                        extractedText = await extractTextFromPDF(buffer);
                         break;
                     case 'docx':
-                        const { value } = await mammoth.extractRawText({ buffer });
-                        extractedText = value;
+                        extractedText = await extractTextFromDocx(buffer);
                         break;
                     case 'png':
                     case 'jpg':
@@ -91,13 +114,9 @@ app.post('/api/analyze-cvs', async (req, res) => {
                         extractedText = text;
                         break;
                     default:
-                        return {
-                            index,
-                            status: 'error',
-                            error: 'Unsupported file type'
-                        };
+                        return { index, status: 'error', error: 'Unsupported file type' };
                 }
-
+                
                 console.log('Extracted Text:', extractedText.substring(0, 200) + '...');
 
                 const modifiedSystemPrompt = `${systemPrompt}
@@ -190,3 +209,32 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
+
+
+async function extractTextFromPDF(buffer) {
+    try {
+        const pdfDoc = await PDFDocument.load(buffer);
+        const pages = await Promise.all(pdfDoc.getPages().map(async (page) => page.getTextContent()));
+        return pages.map((page) => page.items.map((item) => item.str).join(' ')).join('\n');
+    } catch (error) {
+        console.error('Error with pdf-lib, trying OCR-based pdf-extract...', error);
+        return new Promise((resolve, reject) => {
+            pdfExtract(buffer, { layout: 'layout' }, (err, text) => {
+                if (err) reject(err);
+                resolve(text);
+            });
+        });
+    }
+}
+
+async function extractTextFromDocx(buffer) {
+    try {
+        const doc = await docx4js.load(buffer);
+        const xml = doc.content.mainDocument.xml;
+        const docText = new DOMParser().parseFromString(xml, 'text/xml');
+        return Array.from(docText.getElementsByTagName('w:t')).map((node) => node.textContent).join(' ');
+    } catch (error) {
+        console.error('Error extracting DOCX text:', error);
+        return '';
+    }
+}
