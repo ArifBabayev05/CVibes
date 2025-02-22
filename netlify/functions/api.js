@@ -72,20 +72,22 @@ async function extractText(buffer, fileType) {
 async function extractTextFromPDF(buffer) {
     try {
         const pdfDoc = await PDFDocument.load(buffer);
-        return pdfDoc.getPages().map(page => page.getTextContent().then(tc => tc.items.map(i => i.str).join(' '))).join('\n');
+        const pages = pdfDoc.getPages();
+        let text = '';
+        for (const page of pages) {
+            text += page.getTextContent().items.map(item => item.str).join(' ');
+        }
+        return text;
     } catch (error) {
-        console.error('Error with pdf-lib, trying OCR...', error);
-        return new Promise((resolve, reject) => {
-            pdfExtract(buffer, { layout: 'layout' }, (err, text) => (err ? reject(err) : resolve(text)));
-        });
+        console.error('Error extracting PDF text:', error);
+        return '';
     }
 }
 
 async function extractTextFromDocx(buffer) {
     try {
-        const doc = await docx4js.load(buffer);
-        const xml = doc.content.mainDocument.xml;
-        return Array.from(new DOMParser().parseFromString(xml, 'text/xml').getElementsByTagName('w:t')).map(n => n.textContent).join(' ');
+        const { value } = await mammoth.extractRawText({ buffer });
+        return value;
     } catch (error) {
         console.error('Error extracting DOCX text:', error);
         return '';
