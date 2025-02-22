@@ -10,9 +10,9 @@
   headers = {Access-Control-Allow-Origin = "*"}
 
 [[headers]]
-  for = "/*"
-    [headers.values]
-    Access-Control-Allow-Origin = "*"
+  for = "/api/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "https://cvibes.netlify.app"
     Access-Control-Allow-Methods = "GET, POST, OPTIONS"
-    Access-Control-Allow-Headers = "Origin, X-Requested-With, Content-Type, Accept, Authorization"
-    Access-Control-Max-Age = "86400" 
+    Access-Control-Allow-Headers = "Content-Type, Authorization"
+    Access-Control-Allow-Credentials = "true"
