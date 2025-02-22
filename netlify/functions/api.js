@@ -14,19 +14,6 @@ const docx4js = require('docx4js');
 
 const app = express();
 
-// Logging function
-const logToFile = (message) => {
-    const logMessage = `${new Date().toISOString()} - ${message}\n`;
-    fs.appendFileSync(path.join(__dirname, 'logs.txt'), logMessage);
-};
-
-// Override console.log to include logging to file
-const originalConsoleLog = console.log;
-console.log = (...args) => {
-    originalConsoleLog(...args);
-    logToFile(args.join(' '));
-};
-
 // Completely open CORS
 app.use(cors({
     origin: '*',
@@ -67,12 +54,6 @@ Important:
 - Handle variations in CV formats and naming conventions gracefully.
 Your task is to parse and structure the CV text completely, ensuring no important details are omitted.
 `;
-
-// Middleware to log each request
-app.use((req, res, next) => {
-    logToFile(`Request: ${req.method} ${req.url} - Body: ${JSON.stringify(req.body)}`);
-    next();
-});
 
 // Single endpoint to handle all CV processing
 app.post('/api/analyze-cvs', async (req, res) => {
