@@ -28,7 +28,7 @@ app.use(cors({
 
 app.use(express.json({ limit: '50mb' }));
 
-const apiKey = process.env.MISTRAL_API_KEY;
+const apiKey = "6V6226aySY3BqDtPqbsasNFSb3VnHhnf";
 const model = 'mistral-small-latest';
 const systemPrompt = `
 You are an AI assistant specialized in extracting structured information from CV texts. Extract details in JSON format:
