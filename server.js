@@ -133,9 +133,23 @@ function cleanAIResponse(responseContent) {
         throw new Error(`Failed to find JSON in AI response: ${cleanContent}`);
     }
     try {
-        return JSON.parse(cleanContent);
+        const parsedContent = JSON.parse(cleanContent);
+        normalizeSkills(parsedContent);
+        return parsedContent;
     } catch (error) {
         throw new Error(`Failed to parse AI response: ${cleanContent}`);
+    }
+}
+
+function normalizeSkills(parsedContent) {
+    if (parsedContent.Skills && typeof parsedContent.Skills === 'object' && !Array.isArray(parsedContent.Skills)) {
+        const normalizedSkills = [];
+        for (const category in parsedContent.Skills) {
+            if (Array.isArray(parsedContent.Skills[category])) {
+                normalizedSkills.push(...parsedContent.Skills[category]);
+            }
+        }
+        parsedContent.Skills = normalizedSkills;
     }
 }
 
