@@ -24,7 +24,7 @@ app.use(cors({
 
 app.use(express.json({ limit: '50mb' }));
 
-const apiKey = "6V6226aySY3BqDtPqbsasNFSb3VnHhnf";
+const apiKey = process.env.MISTRAL_API_KEY;
 const model = 'mistral-small-latest';
 const systemPrompt = `
 You are an AI assistant specialized in extracting structured information from CV texts. Extract details in JSON format:
@@ -115,7 +115,21 @@ async function getAIResponse(text) {
         ]
     }, { headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
     
-    return JSON.parse(response.data.choices[0].message.content.replace(/```json\n?|```$/g, ''));
+    return cleanAIResponse(response.data.choices[0].message.content);
+}
+
+function cleanAIResponse(responseContent) {
+    let cleanContent = responseContent.trim();
+    if (cleanContent.startsWith('```json')) {
+        cleanContent = cleanContent.replace(/```json\n?/, '').replace(/```$/, '');
+    } else if (cleanContent.startsWith('```')) {
+        cleanContent = cleanContent.replace(/```\n?/, '').replace(/```$/, '');
+    }
+    try {
+        return JSON.parse(cleanContent);
+    } catch (error) {
+        throw new Error(`Failed to parse AI response: ${cleanContent}`);
+    }
 }
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
