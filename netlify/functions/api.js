@@ -14,106 +14,38 @@ const docx4js = require('docx4js');
 
 const app = express();
 
-// Configure CORS to allow requests from specific origins
-const corsOptions = {
-    origin: 'https://cvibes.netlify.app',
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+// Configure CORS to allow requests from any origin
+app.use(cors({
+    origin: '*',
+    methods: 'GET,POST,PUT,DELETE,OPTIONS',
+    allowedHeaders: 'Content-Type,Authorization',
     credentials: true
-};
+}));
 
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // Allow OPTIONS for all routes
-
-
-// JSON gövdeyi ayrıştırmak için middleware (50mb limit)
 app.use(express.json({ limit: '50mb' }));
 
-// Ortam değişkeninden API anahtarını al
 const apiKey = process.env.MISTRAL_API_KEY;
 const model = 'mistral-small-latest';
 const systemPrompt = `
-You are an AI assistant specialized in extracting structured information from CV texts. Extract details in JSON format with the following structure:
-{
-  "Name": "string",
-  "ContactInformation": {
-    "Email": "string",
-    "Phone": "string",
-    "Address": "string (optional)"
-  },
-  "Skills": ["string"],
-  "WorkExperience": [
-    {
-      "JobTitle": "string",
-      "Company": "string",
-      "Duration": "string",
-      "Description": "string"
-    }
-  ],
-  "Summary": "string",
-  "Education": [
-    {
-      "Institution": "string",
-      "Degree": "string",
-      "FieldOfStudy": "string",
-      "Dates": "string"
-    }
-  ],
-  "Certifications": ["string"],
-  "Languages": [
-    {
-      "Language": "string",
-      "Proficiency": "string"
-    }
-  ],
-  "Projects": [
-    {
-      "name": "string",
-      "description": "string"
-    }
-  ],
-  "Achievements": ["string"]
-}
-
-Ensure the JSON is valid and well-formatted. Pay special attention to categorizing the data correctly:
-- Projects should be listed under the "Projects" field, not under "Certifications".
-- Each field should be filled with the appropriate data or left as an empty string or array if not available.
-- If any field is missing from the CV text, assign it an empty string or an empty array as appropriate.
+You are an AI assistant specialized in extracting structured information from CV texts. Extract details in JSON format:
+- Name, ContactInformation, Summary, Education, WorkExperience, Skills, Certifications, Languages, Projects, Achievements, OtherDetails.
+If missing, use an empty string or array.
+Ensure the JSON is valid and well-formatted.
 `;
 
-// OPTIONS istekleri için manuel CORS preflight yanıtı
-app.options('/api/analyze-cvs', (req, res) => {
-    res.status(200).set({
-        "Access-Control-Allow-Origin": "https://cvibes.netlify.app",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "Access-Control-Max-Age": "86400",
-    }).send();
-});
-
-// CV analiz endpoint'i
 app.post('/api/analyze-cvs', async (req, res) => {
     const { documents } = req.body;
     
     if (!Array.isArray(documents)) {
-        return res.status(400).set({
-            "Access-Control-Allow-Origin": "https://cvibes.netlify.app",
-            "Content-Type": "application/json"
-        }).json({ error: 'Invalid format: documents should be an array.' });
+        return res.status(400).json({ error: 'Invalid format: documents should be an array.' });
     }
 
     try {
         const results = await Promise.all(documents.map(processDocument));
-        res.status(200).set({
-            "Access-Control-Allow-Origin": "https://cvibes.netlify.app",
-            "Content-Type": "application/json"
-        }).json({ totalProcessed: results.length, results });
+        res.json({ totalProcessed: results.length, results });
     } catch (error) {
         console.error('Main Error:', error);
-        res.status(500).set({
-            "Access-Control-Allow-Origin": "https://cvibes.netlify.app",
-            "Content-Type": "application/json"
-        }).json({ error: error.message, details: error.response?.data || 'No additional details' });
+        res.status(500).json({ error: error.message, details: error.response?.data || 'No additional details' });
     }
 });
 
@@ -146,13 +78,8 @@ async function extractText(buffer, fileType) {
 
 async function extractTextFromPDF(buffer) {
     try {
-        const pdfDoc = await PDFDocument.load(buffer);
-        const pages = pdfDoc.getPages();
-        let text = '';
-        for (const page of pages) {
-            text += page.getTextContent().items.map(item => item.str).join(' ');
-        }
-        return text;
+        const data = await pdfParse(buffer);
+        return data.text;
     } catch (error) {
         console.error('Error extracting PDF text:', error);
         return '';
@@ -174,25 +101,61 @@ async function extractTextFromImage(buffer) {
     return text;
 }
 
-async function getAIResponse(text) {
-    const response = await axios.post('https://api.mistral.ai/v1/chat/completions', {
-        model,
-        messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: text }
-        ]
-    }, { headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
-    
-    return JSON.parse(response.data.choices[0].message.content.replace(/```json\n?|```$/g, ''));
+async function getAIResponse(text, retries = 5, delay = 2000) {
+    try {
+        const response = await axios.post('https://api.mistral.ai/v1/chat/completions', {
+            model,
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: text }
+            ]
+        }, { headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
+        
+        return cleanAIResponse(response.data.choices[0].message.content);
+    } catch (error) {
+        if (error.response && error.response.status === 429 && retries > 0) {
+            console.warn(`Rate limit hit, retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay + Math.random() * 1000));
+            return getAIResponse(text, retries - 1, delay * 2);
+        } else {
+            throw error;
+        }
+    }
 }
 
-// Sağlık kontrol endpoint'i
-app.get('/api/health', (req, res) => {
-    res.status(200).set({
-        "Access-Control-Allow-Origin": "https://cvibes.netlify.app",
-        "Content-Type": "application/json"
-    }).json({ status: 'ok', timestamp: new Date() });
-});
+function cleanAIResponse(responseContent) {
+    let cleanContent = responseContent.trim();
+    const jsonStart = cleanContent.indexOf('{');
+    const jsonEnd = cleanContent.lastIndexOf('}') + 1;
+    if (jsonStart !== -1 && jsonEnd !== -1) {
+        cleanContent = cleanContent.substring(jsonStart, jsonEnd);
+    } else {
+        throw new Error(`Failed to find JSON in AI response: ${cleanContent}`);
+    }
+    try {
+        const parsedContent = JSON.parse(cleanContent);
+        normalizeSkills(parsedContent);
+        return parsedContent;
+    } catch (error) {
+        throw new Error(`Failed to parse AI response: ${cleanContent}`);
+    }
+}
 
-// Netlify Function handler'ı
+function normalizeSkills(parsedContent) {
+    if (parsedContent.Skills && typeof parsedContent.Skills === 'object' && !Array.isArray(parsedContent.Skills)) {
+        const normalizedSkills = [];
+        for (const category in parsedContent.Skills) {
+            if (Array.isArray(parsedContent.Skills[category])) {
+                normalizedSkills.push(...parsedContent.Skills[category]);
+            }
+        }
+        parsedContent.Skills = normalizedSkills;
+    }
+}
+
+app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
+
 module.exports.handler = serverless(app);
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

@@ -1,3 +1,5 @@
+require('dotenv').config(); // Load environment variables from .env file
+
 const axios = require('axios');
 const express = require('express');
 const serverless = require('serverless-http');
@@ -11,6 +13,8 @@ const { DOMParser } = require('xmldom');
 const pdfExtract = require('pdf-text-extract');
 const { PDFDocument } = require('pdf-lib');
 const docx4js = require('docx4js');
+const connectToDatabase = require('./db'); // Import the MongoDB connection
+const { ObjectId } = require('mongodb'); // Import ObjectId
 
 const app = express();
 
@@ -41,7 +45,8 @@ app.post('/api/analyze-cvs', async (req, res) => {
     }
 
     try {
-        const results = await Promise.all(documents.map(processDocument));
+        const db = await connectToDatabase(); // Connect to MongoDB
+        const results = await Promise.all(documents.map((doc, index) => processDocument(doc, index, db)));
         res.json({ totalProcessed: results.length, results });
     } catch (error) {
         console.error('Main Error:', error);
@@ -49,7 +54,7 @@ app.post('/api/analyze-cvs', async (req, res) => {
     }
 });
 
-async function processDocument(doc, index) {
+async function processDocument(doc, index, db) {
     try {
         if (!doc.base64 || !doc.fileType) {
             return { index, status: 'error', error: 'Missing base64 or fileType' };
@@ -60,6 +65,16 @@ async function processDocument(doc, index) {
         console.log(`Extracted Text [${index}]:`, extractedText.substring(0, 200) + '...');
 
         const aiResponse = await getAIResponse(extractedText);
+        
+        // Save the response to MongoDB with a timestamp
+        const collection = db.collection('responses');
+        await collection.insertOne({ 
+            index, 
+            status: 'success', 
+            result: aiResponse, 
+            createdAt: new Date() // Add the current date and time
+        });
+
         return { index, status: 'success', result: aiResponse };
     } catch (error) {
         console.error(`Processing Error [${index}]:`, error);
@@ -154,6 +169,90 @@ function normalizeSkills(parsedContent) {
 }
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
+
+// Endpoint to fetch all responses
+app.get('/api/responses', async (req, res) => {
+    try {
+        const db = await connectToDatabase(); // Connect to MongoDB
+        const collection = db.collection('responses');
+        const responses = await collection.find({}).toArray();
+        
+        const results = responses.map(response => ({
+            id: response._id,
+            index: response.index,
+            status: response.status,
+            result: response.result
+        }));
+
+        res.json({ totalProcessed: results.length, results });
+    } catch (error) {
+        console.error('Error fetching responses:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Endpoint to fetch a single response by id
+app.get('/api/responses/:id', async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        const db = await connectToDatabase(); // Connect to MongoDB
+        const collection = db.collection('responses');
+        const response = await collection.findOne({ _id: new ObjectId(id) });
+
+        if (!response) {
+            return res.status(404).json({ error: 'Response not found' });
+        }
+
+        res.json({ id: response._id, index: response.index, status: response.status, result: response.result });
+    } catch (error) {
+        console.error(`Error fetching response [${id}]:`, error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Endpoint to fetch recent responses with a time range
+app.get('/api/recent-responses', async (req, res) => {
+    const { timeRange } = req.query;
+    let startTime;
+
+    switch (timeRange) {
+        case 'lastHour':
+            startTime = new Date(Date.now() - 60 * 60 * 1000); // Last hour
+            break;
+        case 'lastDay':
+            startTime = new Date(Date.now() - 24 * 60 * 60 * 1000); // Last day
+            break;
+        case 'lastWeek':
+            startTime = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // Last week
+            break;
+        case 'lastMonth':
+            startTime = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Last month
+            break;
+        case 'all':
+        default:
+            startTime = new Date(0); // All time
+            break;
+    }
+
+    try {
+        const db = await connectToDatabase(); // Connect to MongoDB
+        const collection = db.collection('responses');
+        const responses = await collection.find({ createdAt: { $gte: startTime } }).toArray();
+        
+        const results = responses.map(response => ({
+            id: response._id,
+            index: response.index,
+            status: response.status,
+            result: response.result
+        }));
+
+        res.json({ totalProcessed: results.length, results });
+    } catch (error) {
+        console.error('Error fetching recent responses:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
 
 module.exports.handler = serverless(app);
 
