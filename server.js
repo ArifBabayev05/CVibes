@@ -24,7 +24,7 @@ app.use(cors({
 
 app.use(express.json({ limit: '50mb' }));
 
-const apiKey = process.env.MISTRAL_API_KEY;
+const apiKey = '6V6226aySY3BqDtPqbsasNFSb3VnHhnf';
 const model = 'mistral-small-latest';
 const systemPrompt = `
 You are an AI assistant specialized in extracting structured information from CV texts. Extract details in JSON format:
@@ -57,7 +57,6 @@ async function processDocument(doc, index) {
 
         const buffer = Buffer.from(doc.base64, 'base64');
         let extractedText = await extractText(buffer, doc.fileType);
-        console.log(`Extracted Text [${index}]:`, extractedText.substring(0, 200) + '...');
 
         const aiResponse = await getAIResponse(extractedText);
         return { index, status: 'success', result: aiResponse };
@@ -78,13 +77,8 @@ async function extractText(buffer, fileType) {
 
 async function extractTextFromPDF(buffer) {
     try {
-        const pdfDoc = await PDFDocument.load(buffer);
-        const pages = pdfDoc.getPages();
-        let text = '';
-        for (const page of pages) {
-            text += page.getTextContent().items.map(item => item.str).join(' ');
-        }
-        return text;
+        const data = await pdfParse(buffer);
+        return data.text;
     } catch (error) {
         console.error('Error extracting PDF text:', error);
         return '';
@@ -124,6 +118,8 @@ function cleanAIResponse(responseContent) {
     const jsonEnd = cleanContent.lastIndexOf('}') + 1;
     if (jsonStart !== -1 && jsonEnd !== -1) {
         cleanContent = cleanContent.substring(jsonStart, jsonEnd);
+    } else {
+        throw new Error(`Failed to find JSON in AI response: ${cleanContent}`);
     }
     try {
         return JSON.parse(cleanContent);
