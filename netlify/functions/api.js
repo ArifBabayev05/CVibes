@@ -33,10 +33,52 @@ app.use(express.json({ limit: '50mb' }));
 const apiKey = process.env.MISTRAL_API_KEY;
 const model = 'mistral-small-latest';
 const systemPrompt = `
-You are an AI assistant specialized in extracting structured information from CV texts. Extract details in JSON format:
-- Name, ContactInformation, Summary, Education, WorkExperience, Skills, Certifications, Languages, Projects, Achievements, OtherDetails.
-If missing, use an empty string or array.
-Ensure the JSON is valid and well-formatted.
+You are an AI assistant specialized in extracting structured information from CV texts. Extract details in JSON format with the following structure:
+{
+  "Name": "string",
+  "ContactInformation": {
+    "Email": "string",
+    "Phone": "string",
+    "Address": "string (optional)"
+  },
+  "Skills": ["string"],
+  "WorkExperience": [
+    {
+      "JobTitle": "string",
+      "Company": "string",
+      "Duration": "string",
+      "Description": "string"
+    }
+  ],
+  "Summary": "string",
+  "Education": [
+    {
+      "Institution": "string",
+      "Degree": "string",
+      "FieldOfStudy": "string",
+      "Dates": "string"
+    }
+  ],
+  "Certifications": ["string"],
+  "Languages": [
+    {
+      "Language": "string",
+      "Proficiency": "string"
+    }
+  ],
+  "Projects": [
+    {
+      "name": "string",
+      "description": "string"
+    }
+  ],
+  "Achievements": ["string"]
+}
+
+Ensure the JSON is valid and well-formatted. Pay special attention to categorizing the data correctly:
+- Projects should be listed under the "Projects" field, not under "Certifications".
+- Each field should be filled with the appropriate data or left as an empty string or array if not available.
+- If any field is missing from the CV text, assign it an empty string or an empty array as appropriate.
 `;
 
 // OPTIONS istekleri için manuel CORS preflight yanıtı
