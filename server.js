@@ -24,7 +24,7 @@ app.use(cors({
 
 app.use(express.json({ limit: '50mb' }));
 
-const apiKey = '6V6226aySY3BqDtPqbsasNFSb3VnHhnf';
+const apiKey = process.env.MISTRAL_API_KEY;
 const model = 'mistral-small-latest';
 const systemPrompt = `
 You are an AI assistant specialized in extracting structured information from CV texts. Extract details in JSON format:
@@ -57,6 +57,7 @@ async function processDocument(doc, index) {
 
         const buffer = Buffer.from(doc.base64, 'base64');
         let extractedText = await extractText(buffer, doc.fileType);
+        console.log(`Extracted Text [${index}]:`, extractedText.substring(0, 200) + '...');
 
         const aiResponse = await getAIResponse(extractedText);
         return { index, status: 'success', result: aiResponse };
@@ -100,16 +101,26 @@ async function extractTextFromImage(buffer) {
     return text;
 }
 
-async function getAIResponse(text) {
-    const response = await axios.post('https://api.mistral.ai/v1/chat/completions', {
-        model,
-        messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: text }
-        ]
-    }, { headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
-    
-    return cleanAIResponse(response.data.choices[0].message.content);
+async function getAIResponse(text, retries = 4, delay = 1000) {
+    try {
+        const response = await axios.post('https://api.mistral.ai/v1/chat/completions', {
+            model,
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: text }
+            ]
+        }, { headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
+        
+        return cleanAIResponse(response.data.choices[0].message.content);
+    } catch (error) {
+        if (error.response && error.response.status === 429 && retries > 0) {
+            console.warn(`Rate limit hit, retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return getAIResponse(text, retries - 1, delay * 2);
+        } else {
+            throw error;
+        }
+    }
 }
 
 function cleanAIResponse(responseContent) {
