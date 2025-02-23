@@ -101,7 +101,7 @@ async function extractTextFromImage(buffer) {
     return text;
 }
 
-async function getAIResponse(text, retries = 4, delay = 1000) {
+async function getAIResponse(text, retries = 5, delay = 2000) {
     try {
         const response = await axios.post('https://api.mistral.ai/v1/chat/completions', {
             model,
@@ -115,7 +115,7 @@ async function getAIResponse(text, retries = 4, delay = 1000) {
     } catch (error) {
         if (error.response && error.response.status === 429 && retries > 0) {
             console.warn(`Rate limit hit, retrying in ${delay}ms...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
+            await new Promise(resolve => setTimeout(resolve, delay + Math.random() * 1000));
             return getAIResponse(text, retries - 1, delay * 2);
         } else {
             throw error;
