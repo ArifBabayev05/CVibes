@@ -120,10 +120,10 @@ async function getAIResponse(text) {
 
 function cleanAIResponse(responseContent) {
     let cleanContent = responseContent.trim();
-    if (cleanContent.startsWith('```json')) {
-        cleanContent = cleanContent.replace(/```json\n?/, '').replace(/```$/, '');
-    } else if (cleanContent.startsWith('```')) {
-        cleanContent = cleanContent.replace(/```\n?/, '').replace(/```$/, '');
+    const jsonStart = cleanContent.indexOf('{');
+    const jsonEnd = cleanContent.lastIndexOf('}') + 1;
+    if (jsonStart !== -1 && jsonEnd !== -1) {
+        cleanContent = cleanContent.substring(jsonStart, jsonEnd);
     }
     try {
         return JSON.parse(cleanContent);
