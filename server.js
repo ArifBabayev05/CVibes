@@ -31,10 +31,23 @@ app.use(express.json({ limit: '50mb' }));
 const apiKey = process.env.MISTRAL_API_KEY;
 const model = 'mistral-small-latest';
 const systemPrompt = `
-You are an AI assistant specialized in extracting structured information from CV texts. Extract details in JSON format:
-- Name, ContactInformation, Summary, Education, WorkExperience, Skills, Certifications, Languages, Projects, Achievements, OtherDetails.
-If missing, use an empty string or array.
-Ensure the JSON is valid and well-formatted.
+You are an AI assistant specialized in extracting structured information from CV texts. Analyze the provided CV text and extract all relevant details. Your output must be a valid JSON object with the following keys:
+- **Name**: The full name of the candidate.
+- **ContactInformation**: All contact details such as email, phone number, address, and any other available contact info.
+- **Summary**: A brief professional summary or objective, if available.
+- **Education**: Details of the candidate's educational background, including institution names, degrees, fields of study, and dates.
+- **WorkExperience**: Job history including job titles, company names, durations, and descriptions of responsibilities and achievements.
+- **Skills**: A list of technical and soft skills mentioned.
+- **Certifications**: Any certifications or licenses obtained.
+- **Languages**: Languages known and proficiency levels, if available.
+- **Projects**: Notable projects or portfolio items described.
+- **Achievements**: Any awards, honors, or special recognitions.
+- **OtherDetails**: Any additional relevant information that does not fit in the above categories.
+Important:
+- If any field is missing from the CV text, assign it an empty string or an empty array (for list-type fields) as appropriate.
+- Ensure the JSON is well-formatted and parsable.
+- Handle variations in CV formats and naming conventions gracefully.
+Your task is to parse and structure the CV text completely, ensuring no important details are omitted.
 `;
 
 app.post('/api/analyze-cvs', async (req, res) => {
@@ -62,7 +75,6 @@ async function processDocument(doc, index, db) {
 
         const buffer = Buffer.from(doc.base64, 'base64');
         let extractedText = await extractText(buffer, doc.fileType);
-        console.log(`Extracted Text [${index}]:`, extractedText.substring(0, 200) + '...');
 
         const aiResponse = await getAIResponse(extractedText);
         
@@ -72,10 +84,18 @@ async function processDocument(doc, index, db) {
             index, 
             status: 'success', 
             result: aiResponse, 
-            createdAt: new Date() // Add the current date and time
+            base64: doc.base64, 
+            candidateStatus: doc.candidateStatus || 'pending',
+            createdAt: new Date() 
         });
 
-        return { index, status: 'success', result: aiResponse };
+        return { 
+            index, 
+            status: 'success', 
+            result: aiResponse, 
+            base64: doc.base64, 
+            candidateStatus: doc.candidateStatus || 'pending' 
+        };
     } catch (error) {
         console.error(`Processing Error [${index}]:`, error);
         return { index, status: 'error', error: error.message };
@@ -147,12 +167,16 @@ function cleanAIResponse(responseContent) {
     } else {
         throw new Error(`Failed to find JSON in AI response: ${cleanContent}`);
     }
+
+    // Replace problematic characters
+    cleanContent = cleanContent.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+
     try {
         const parsedContent = JSON.parse(cleanContent);
         normalizeSkills(parsedContent);
         return parsedContent;
     } catch (error) {
-        throw new Error(`Failed to parse AI response: ${cleanContent}`);
+        throw new Error(`${error} + Failed to parse AI response: ${cleanContent}`);
     }
 }
 
@@ -181,7 +205,9 @@ app.get('/api/responses', async (req, res) => {
             id: response._id,
             index: response.index,
             status: response.status,
-            result: response.result
+            result: response.result,
+            base64: response.base64, // Include base64 data
+            candidateStatus: response.candidateStatus // Include candidate status
         }));
 
         res.json({ totalProcessed: results.length, results });
@@ -204,7 +230,14 @@ app.get('/api/responses/:id', async (req, res) => {
             return res.status(404).json({ error: 'Response not found' });
         }
 
-        res.json({ id: response._id, index: response.index, status: response.status, result: response.result });
+        res.json({ 
+            id: response._id, 
+            index: response.index, 
+            status: response.status, 
+            result: response.result,
+            base64: response.base64, // Include base64 data
+            candidateStatus: response.candidateStatus // Include candidate status
+        });
     } catch (error) {
         console.error(`Error fetching response [${id}]:`, error);
         res.status(500).json({ error: error.message });
@@ -244,7 +277,9 @@ app.get('/api/recent-responses', async (req, res) => {
             id: response._id,
             index: response.index,
             status: response.status,
-            result: response.result
+            result: response.result,
+            base64: response.base64, // Include base64 data
+            candidateStatus: response.candidateStatus // Include candidate status
         }));
 
         res.json({ totalProcessed: results.length, results });
@@ -253,6 +288,109 @@ app.get('/api/recent-responses', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+app.post('/api/match-candidates', async (req, res) => {
+    const { jobDescription } = req.body;
+
+    if (!jobDescription) {
+        return res.status(400).json({ error: 'Job description is required.' });
+    }
+
+    try {
+        const db = await connectToDatabase(); // Connect to MongoDB
+        const collection = db.collection('responses');
+        const responses = await collection.find({}).toArray();
+
+        const candidates = responses.map(response => ({
+            id: response._id,
+            result: response.result,
+            candidateStatus: response.candidateStatus
+        }));
+
+        const aiResponse = await getMatchingAIResponse(candidates, jobDescription);
+
+        res.json({ matchingResults: aiResponse });
+    } catch (error) {
+        console.error('Error matching candidates:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+async function getMatchingAIResponse(candidates, jobDescription) {
+    const prompt = `
+    You are an AI assistant specialized in matching job descriptions with candidate CVs. Analyze the provided job description and the list of candidate CVs, and return a matching rate and reasons for each candidate. Your output must be a valid JSON array with the following structure:
+    [
+        {
+            "candidateId": "candidate_id",
+            "matchingRate": "matching_rate",
+            "reasons": "reasons_for_matching"
+        },
+        ...
+    ]
+    Important:
+    - The matching rate should be a percentage value between 0 and 100.
+    - The reasons should be a brief explanation of why the candidate is suitable or not suitable for the job.
+    `;
+
+    const response = await axios.post('https://api.mistral.ai/v1/chat/completions', {
+        model,
+        messages: [
+            { role: 'system', content: prompt },
+            { role: 'user', content: `Job Description: ${jobDescription}` },
+            { role: 'user', content: `Candidates: ${JSON.stringify(candidates)}` }
+        ]
+    }, { headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
+
+    const aiResponse = response.data.choices[0].message.content;
+
+    // Remove any non-JSON parts from the response
+    const jsonStart = aiResponse.indexOf('[');
+    const jsonEnd = aiResponse.lastIndexOf(']') + 1;
+    const cleanResponse = aiResponse.substring(jsonStart, jsonEnd);
+
+    const parsedResponse = JSON.parse(cleanResponse);
+
+    return parsedResponse; // Return the parsed JSON response
+}
+
+app.get("/auth/linkedin/token", async (req, res) => {
+    const { code } = req.query;
+    try {
+      // Exchange code for access token
+      const tokenResponse = await axios.post(
+        "https://www.linkedin.com/oauth/v2/accessToken",
+        new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: "http://localhost:8080/auth/linkedin/callback",
+          client_id: "78m6kge1f5tdkb",
+          client_secret: "WPL_AP1.DVVALmkLBdT3xrDH.XpbLGA==",
+        }),
+        { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+      );
+  
+      const accessToken = tokenResponse.data.access_token;
+      if (!accessToken) {
+        throw new Error("No access token received");
+      }
+  
+      // Fetch user data with the access token
+      const userResponse = await axios.get("https://api.linkedin.com/v2/userinfo", {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+  
+      // Send both token and user data back to the frontend
+      res.json({
+        access_token: accessToken,
+        user: userResponse.data,
+      });
+    } catch (error) {
+      console.error("LinkedIn Error:", error.response?.data || error.message);
+      res.status(500).json({ error: error.response?.data || "Failed to process LinkedIn request" });
+    }
+  });
 
 module.exports.handler = serverless(app);
 
